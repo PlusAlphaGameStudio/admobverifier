@@ -1,20 +1,42 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/messaging"
 	"fmt"
-	"io/ioutil"
+	"github.com/joho/godotenv"
+	"google.golang.org/api/option"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+func initializeAppWithServiceAccount() *firebase.App {
+
+	credFilePath := os.Getenv("ADMOB_VERIFIER_CRED_FILE_PATH")
+	log.Print(credFilePath)
+
+	opt := option.WithCredentialsFile(credFilePath)
+	app, err := firebase.NewApp(context.Background(), nil, opt)
+	if err != nil {
+		log.Fatalf("error initializing app: %v\n", err)
+	}
+
+	return app
+}
 
 type VerifierKeys struct {
 	Keys []struct {
@@ -35,9 +57,11 @@ func fetchAdMobPublicKeys() {
 		fmt.Println("Error fetching JSON:", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Error reading response body:", err)
 		return
@@ -114,13 +138,65 @@ func verifySSVRequest(r *http.Request) bool {
 
 func rewardHandler(w http.ResponseWriter, r *http.Request) {
 	if verifySSVRequest(r) {
-		fmt.Fprintln(w, "Reward Verified and Processed!")
+		_, _ = fmt.Fprintln(w, "Reward Verified and Processed!")
 	} else {
 		http.Error(w, "Invalid Request", http.StatusForbidden)
 	}
 }
 
+func accessServicesSingleApp(app *firebase.App) (*messaging.Client, error) {
+	client, err := app.Messaging(context.Background())
+	if err != nil {
+		log.Fatalf("error getting Auth client: %v\n", err)
+	}
+
+	return client, err
+}
+
+var messagingClient *messaging.Client
+
 func main() {
+	goDotErr := godotenv.Load()
+	if goDotErr != nil {
+		log.Println("Error loading .env file")
+	}
+
+	var app *firebase.App
+
+	app = initializeAppWithServiceAccount()
+
+	var err error
+
+	messagingClient, err = accessServicesSingleApp(app)
+	if err != nil {
+		panic(errors.New(fmt.Sprintf("messaging client init failed: %s", err.Error())))
+	}
+
+	testMessage()
+
 	http.HandleFunc("/reward", rewardHandler)
-	http.ListenAndServe(":60340", nil)
+	_ = http.ListenAndServe(":60340", nil)
+}
+
+func testMessage() {
+
+
+	token := os.Getenv("ADMOB_VERIFIER_TEST_TOKEN")
+	message := &messaging.Message{
+		Token: token,
+		Data: map[string]string{
+			"보낸 시각": time.Now().String(),
+			"점수": "850",
+			"시간": "2:45",
+		},
+	}
+
+	// Send a message to the device corresponding to the provided
+	// registration token.
+	response, err := messagingClient.Send(context.Background(), message)
+	if err != nil {
+		panic(errors.New(fmt.Sprintf("test message send failed")))
+	}
+
+	log.Println(response)
 }

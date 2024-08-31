@@ -48,6 +48,10 @@ type VerifierKeys struct {
 	PublicKeys []*ecdsa.PublicKey
 }
 
+type CustomData struct {
+	Token string `json:"token"`
+}
+
 var publicKeys = make(map[int64]*ecdsa.PublicKey)
 var lastPublicKeysUpdateTime = time.UnixMilli(0)
 
@@ -111,7 +115,11 @@ func verifySSVRequest(r *http.Request) bool {
 		return false
 	}
 
+
+
 	signatureData := r.URL.RawQuery
+	log.Println(signatureData)
+
 	signatureData = signatureData[0:strings.Index(signatureData, "&signature=")]
 
 	decodedData, err := url.QueryUnescape(signatureData)
@@ -132,6 +140,21 @@ func verifySSVRequest(r *http.Request) bool {
 	}
 
 	isValid := ecdsa.VerifyASN1(publicKeys[keyId], hash[:], signatureBytes)
+
+	userId := queryParams.Get("user_id")
+	customDataJson := queryParams.Get("custom_data")
+
+	var customData CustomData
+	err = json.Unmarshal([]byte(customDataJson), &customData)
+	if err != nil {
+		log.Println("Error parsing custom_data as JSON:", err)
+	}
+
+	if len(customData.Token) > 0 {
+		sendPush(customData.Token, strconv.FormatBool(isValid))
+	}
+
+	log.Printf("Result: %t, User ID: %s", isValid, userId)
 
 	return isValid
 }
@@ -175,19 +198,24 @@ func main() {
 	testMessage()
 
 	http.HandleFunc("/reward", rewardHandler)
+
+	log.Println("LISTEN started on port 60340...")
 	_ = http.ListenAndServe(":60340", nil)
 }
 
 func testMessage() {
-
+	log.Println("Sending test message...")
 
 	token := os.Getenv("ADMOB_VERIFIER_TEST_TOKEN")
+	sendPush(token, "test")
+}
+
+func sendPush(token string, result string) {
 	message := &messaging.Message{
 		Token: token,
 		Data: map[string]string{
-			"보낸 시각": time.Now().String(),
-			"점수": "850",
-			"시간": "2:45",
+			"time": time.Now().String(),
+			"result": result,
 		},
 	}
 
@@ -195,7 +223,7 @@ func testMessage() {
 	// registration token.
 	response, err := messagingClient.Send(context.Background(), message)
 	if err != nil {
-		panic(errors.New(fmt.Sprintf("test message send failed")))
+		panic(errors.New(fmt.Sprintf("send push failed")))
 	}
 
 	log.Println(response)

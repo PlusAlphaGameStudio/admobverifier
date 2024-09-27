@@ -223,7 +223,7 @@ func sendPush(token string, result string) {
 	// registration token.
 	response, err := messagingClient.Send(context.Background(), message)
 	if err != nil {
-		panic(errors.New(fmt.Sprintf("send push failed")))
+		panic(fmt.Errorf("send push failed: %v", err))
 	}
 
 	log.Println(response)

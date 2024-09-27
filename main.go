@@ -204,9 +204,13 @@ func main() {
 }
 
 func testMessage() {
+	token := os.Getenv("ADMOB_VERIFIER_TEST_TOKEN")
+	if len(token) == 0 {
+		return
+	}
+
 	log.Println("Sending test message...")
 
-	token := os.Getenv("ADMOB_VERIFIER_TEST_TOKEN")
 	sendPush(token, "test")
 }
 
@@ -223,7 +227,7 @@ func sendPush(token string, result string) {
 	// registration token.
 	response, err := messagingClient.Send(context.Background(), message)
 	if err != nil {
-		panic(fmt.Errorf("send push failed: %v", err))
+		log.Printf("send push failed: %v", err)
 	}
 
 	log.Println(response)
